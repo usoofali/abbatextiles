@@ -4,10 +4,10 @@
 # /public/images/vendor
 # /public/js/main.js
 # /node_modules
-/public/hot
-/public/storage
-/storage/*.key
-/storage/framework/sessions
+# /public/hot
+# /public/storage
+# /storage/*.key
+# /storage/framework/sessions
 /vendor
 .env
 .env.backup
