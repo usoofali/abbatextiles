@@ -255,7 +255,10 @@ class SyncService
                 }
             });
 
-            // $this->updateLastSyncTime($tableName);
+            // Update last sync time only if records were processed
+            if ($processed > 0) {
+                $this->updateLastSyncTime($tableName);
+            }
             
             return [
                 'success' => true,
@@ -450,19 +453,24 @@ class SyncService
                 throw new \Exception("Missing ID for model {$modelClass}");
             }
 
-            // Check if record is newer than last sync
-            $recordDate = $this->validateDate($row['updated_at'] ?? $row['created_at'] ?? null);
-            if ($recordDate && $recordDate <= $lastSync) {
-                $this->log('debug', "Skipping record {$row['id']} - not newer than last sync");
-                return false;
-            }
+            // Check if the model has timestamp columns
+            $hasTimestamps = $this->modelHasTimestamps($modelClass);
+            
+            if ($hasTimestamps) {
+                // Check if record is newer than last sync
+                $recordDate = $this->validateDate($row['updated_at'] ?? $row['created_at'] ?? null);
+                if ($recordDate && $recordDate <= $lastSync) {
+                    $this->log('debug', "Skipping record {$row['id']} - not newer than last sync");
+                    return false;
+                }
 
-            // Process dates
-            foreach ($this->dateFields as $field) {
-                if (isset($row[$field])) {
-                    $row[$field] = $this->validateDate($row[$field]);
-                    if ($row[$field] === null) {
-                        unset($row[$field]);
+                // Process dates
+                foreach ($this->dateFields as $field) {
+                    if (isset($row[$field])) {
+                        $row[$field] = $this->validateDate($row[$field]);
+                        if ($row[$field] === null) {
+                            unset($row[$field]);
+                        }
                     }
                 }
             }
@@ -477,6 +485,26 @@ class SyncService
 
         } catch (\Exception $e) {
             $this->log('warning', "Upsert failed for model {$modelClass}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Check if a model has timestamp columns
+     */
+    protected function modelHasTimestamps(string $modelClass): bool
+    {
+        try {
+            $model = new $modelClass();
+            $tableName = $model->getTable();
+            
+            // Check if the table has timestamp columns
+            $columns = \DB::select("SHOW COLUMNS FROM `{$tableName}`");
+            $columnNames = array_column($columns, 'Field');
+            
+            return in_array('created_at', $columnNames) && in_array('updated_at', $columnNames);
+        } catch (\Exception $e) {
+            $this->log('warning', "Could not check timestamps for model {$modelClass}: " . $e->getMessage());
             return false;
         }
     }

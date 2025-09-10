@@ -32,6 +32,26 @@ class SyncController extends Controller
     }
 
     /**
+     * Check if a model has timestamp columns
+     */
+    protected function modelHasTimestamps(string $modelClass): bool
+    {
+        try {
+            $model = new $modelClass();
+            $tableName = $model->getTable();
+            
+            // Check if the table has timestamp columns
+            $columns = \DB::select("SHOW COLUMNS FROM `{$tableName}`");
+            $columnNames = array_column($columns, 'Field');
+            
+            return in_array('created_at', $columnNames) && in_array('updated_at', $columnNames);
+        } catch (\Exception $e) {
+            $this->log('warning', "Could not check timestamps for model {$modelClass}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Pull data from master for a specific table
      * 
      * @param Request $request
@@ -71,10 +91,19 @@ class SyncController extends Controller
             
             // Get records that have been updated since last sync
             $modelClass = $models[$tableName]['class'];
-            $records = $modelClass::where(function ($query) use ($lastSync) {
-                $query->where('updated_at', '>', $lastSync)
-                      ->orWhere('created_at', '>', $lastSync);
-            })->get();
+            
+            // Check if the model has timestamp columns
+            $hasTimestamps = $this->modelHasTimestamps($modelClass);
+            
+            if ($hasTimestamps) {
+                $records = $modelClass::where(function ($query) use ($lastSync) {
+                    $query->where('updated_at', '>', $lastSync)
+                          ->orWhere('created_at', '>', $lastSync);
+                })->get();
+            } else {
+                // For tables without timestamps, get all records
+                $records = $modelClass::all();
+            }
 
             $data = $records->map(function ($item) {
                 $array = $item->toArray();
