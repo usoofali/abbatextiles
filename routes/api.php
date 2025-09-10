@@ -141,7 +141,7 @@ Route::middleware(['auth:api', 'Is_Active'])->group(function () {
     //--------------------------------------------------------------------\\
     Route::resource('attendances', 'hrm\AttendancesController');
     Route::get("daily_attendance", "hrm\AttendancesController@daily_attendance")->name('daily_attendance');
-    Route::post('attendance_by_employee/{id}', 'hrm\EmployeeSessionController@attendance_by_employee')->name('attendance_by_employee.post');
+    // Route::post('attendance_by_employee/{id}', 'hrm\EmployeeSessionController@attendance_by_employee')->name('attendance_by_employee.post');
     Route::post("attendances/delete/by_selection", "hrm\AttendancesController@delete_by_selection");
 
 
@@ -425,29 +425,18 @@ Route::middleware(['auth:api', 'Is_Active'])->group(function () {
     Route::get('sales_print_invoice/{id}', 'SalesController@Print_Invoice_POS');
     
 
-    // Add these routes to your routes/api.php file
-    Route::prefix('sync')->group(function () {
-    Route::get('tables', 'SyncController@tables');
-    Route::get('status', 'SyncController@status');
-    Route::get('status/{tableName}', 'SyncController@tableStatus');
-    Route::get('pull/{tableName}', 'SyncController@pull');
-    Route::post('push/{tableName}', 'SyncController@push');
-    Route::post('reset/{tableName?}', 'SyncController@reset');
-    Route::post('full', 'SyncController@fullSync');
-});
-
 // Sync API routes
 Route::prefix('sync')->group(function () {
-    Route::get('tables', [SyncController::class, 'tables']);
-    Route::get('status', [SyncController::class, 'status']);
-    Route::get('status/{tableName}', [SyncController::class, 'tableStatus']);
-    Route::get('pull/{tableName}', [SyncController::class, 'pull']);
-    Route::post('push/{tableName}', [SyncController::class, 'push']);
-    Route::post('reset/{tableName?}', [SyncController::class, 'reset']);
-    Route::post('full', [SyncController::class, 'fullSync']);
+    Route::get('tables', [\App\Http\Controllers\Api\SyncController::class, 'tables']);
+    Route::get('status', [\App\Http\Controllers\Api\SyncController::class, 'status']);
+    Route::get('status/{tableName}', [\App\Http\Controllers\Api\SyncController::class, 'tableStatus']);
+    Route::get('pull/{tableName}', [\App\Http\Controllers\Api\SyncController::class, 'pull']);
+    Route::post('push/{tableName}', [\App\Http\Controllers\Api\SyncController::class, 'push']);
+    Route::post('reset/{tableName?}', [\App\Http\Controllers\Api\SyncController::class, 'reset']);
+    Route::post('full', [\App\Http\Controllers\Api\SyncController::class, 'fullSync']);
     
     // Additional sync methods for compatibility
-    Route::post('upload', [SyncController::class, 'upload']);
-    Route::get('download', [SyncController::class, 'download']);
-    Route::post('acknowledge', [SyncController::class, 'acknowledge']);
+    Route::post('upload', [\App\Http\Controllers\Api\SyncController::class, 'upload']);
+    Route::get('download', [\App\Http\Controllers\Api\SyncController::class, 'download']);
+    Route::post('acknowledge', [\App\Http\Controllers\Api\SyncController::class, 'acknowledge']);
 });
