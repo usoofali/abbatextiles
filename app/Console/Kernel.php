@@ -85,6 +85,14 @@ class Kernel extends ConsoleKernel
             
             \Log::info('Temporary files cleanup completed');
         })->weekly();
+
+        // Clean up old sync logs daily at 3:00 AM
+        $schedule->call(function () {
+            $syncService = app(\App\Services\SyncService::class);
+            $deleted = $syncService->cleanupOldSyncLogs(7); // Keep logs for 7 days
+            
+            \Log::info("Sync logs cleanup completed - deleted {$deleted} old logs");
+        })->dailyAt('03:00');
     }
 
     /**

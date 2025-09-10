@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use ReflectionClass;
 use ReflectionException;
+use App\Models\SyncLog;
 
 class SyncService
 {
@@ -330,7 +331,8 @@ class SyncService
                 throw new \Exception("Server responded with HTTP {$response->status()}");
             }
 
-            $this->updateLastSyncTime($tableName);
+            // Mark sync logs as completed
+            $this->markSyncLogsAsCompleted($changes);
             
             return [
                 'success' => true,
@@ -339,6 +341,9 @@ class SyncService
             ];
 
         } catch (\Exception $e) {
+            // Mark sync logs as failed
+            $this->markSyncLogsAsFailed($changes, $e->getMessage());
+            
             $this->log('error', "Push failed for {$tableName}: " . $e->getMessage());
             return [
                 'success' => false,
@@ -349,33 +354,35 @@ class SyncService
     }
 
     /**
-     * Get local changes for a specific model
+     * Get local changes for a specific model using SyncLog
      */
     protected function getLocalChangesForModel(string $tableName, array $modelInfo): array
     {
         try {
             $modelClass = $modelInfo['class'];
-            $lastSync = $this->getLastSyncTime($tableName);
+            
+            // Get pending sync logs for this model
+            $syncLogs = SyncLog::where('model_name', $modelClass)
+                ->whereIn('sync_status', ['pending', 'failed'])
+                ->orderBy('created_at', 'asc')
+                ->get();
 
-            // Get records updated or created after last sync
-            $changes = $modelClass::where(function ($query) use ($lastSync) {
-                $query->where('updated_at', '>', $lastSync)
-                      ->orWhere('created_at', '>', $lastSync);
-            })
-            ->get()
-            ->map(function ($item) {
-                $array = $item->toArray();
+            if ($syncLogs->isEmpty()) {
+                $this->log('info', "No pending sync logs found for {$tableName}");
+                return [];
+            }
+
+            $changes = [];
+            foreach ($syncLogs as $syncLog) {
+                // Mark as syncing
+                $syncLog->markAsSyncing();
                 
-                // Process date fields
-                foreach ($this->dateFields as $field) {
-                    if (isset($array[$field])) {
-                        $array[$field] = $this->validateDate($array[$field]);
-                    }
+                // Get the actual record data
+                $record = $this->getRecordForSyncLog($syncLog, $modelClass);
+                if ($record) {
+                    $changes[] = $record;
                 }
-                
-                return $array;
-            })
-            ->toArray();
+            }
 
             $this->log('info', "Changes found for {$tableName}: " . count($changes));
             return $changes;
@@ -383,6 +390,52 @@ class SyncService
         } catch (\Exception $e) {
             $this->log('error', "Failed getting changes for {$tableName}: " . $e->getMessage());
             return [];
+        }
+    }
+
+    /**
+     * Get record data for a sync log
+     */
+    protected function getRecordForSyncLog(SyncLog $syncLog, string $modelClass): ?array
+    {
+        try {
+            // For delete actions, use the stored data
+            if ($syncLog->action === 'delete') {
+                return [
+                    'id' => $syncLog->model_id,
+                    'action' => 'delete',
+                    'data' => $syncLog->data,
+                    'sync_log_id' => $syncLog->id
+                ];
+            }
+
+            // For create/update actions, get fresh data from database
+            $record = $modelClass::find($syncLog->model_id);
+            if (!$record) {
+                $this->log('warning', "Record not found for sync log: {$syncLog->id}");
+                $syncLog->markAsFailed('Record not found');
+                return null;
+            }
+
+            $array = $record->toArray();
+            
+            // Process date fields
+            foreach ($this->dateFields as $field) {
+                if (isset($array[$field])) {
+                    $array[$field] = $this->validateDate($array[$field]);
+                }
+            }
+
+            // Add sync metadata
+            $array['action'] = $syncLog->action;
+            $array['sync_log_id'] = $syncLog->id;
+            
+            return $array;
+
+        } catch (\Exception $e) {
+            $this->log('error', "Failed getting record for sync log {$syncLog->id}: " . $e->getMessage());
+            $syncLog->markAsFailed($e->getMessage());
+            return null;
         }
     }
 
@@ -624,6 +677,75 @@ class SyncService
         } catch (\Exception $e) {
             $this->log('error', "Failed resetting sync data: " . $e->getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Mark sync logs as completed for successfully synced records
+     */
+    protected function markSyncLogsAsCompleted(array $changes): void
+    {
+        try {
+            $syncLogIds = array_filter(array_column($changes, 'sync_log_id'));
+            
+            if (!empty($syncLogIds)) {
+                SyncLog::whereIn('id', $syncLogIds)
+                    ->update(['sync_status' => 'completed']);
+                
+                $this->log('info', "Marked " . count($syncLogIds) . " sync logs as completed");
+            }
+        } catch (\Exception $e) {
+            $this->log('error', "Failed marking sync logs as completed: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Mark sync logs as failed for unsuccessfully synced records
+     */
+    protected function markSyncLogsAsFailed(array $changes, string $errorMessage): void
+    {
+        try {
+            $syncLogIds = array_filter(array_column($changes, 'sync_log_id'));
+            
+            if (!empty($syncLogIds)) {
+                SyncLog::whereIn('id', $syncLogIds)
+                    ->update([
+                        'sync_status' => 'failed',
+                        'error_message' => $errorMessage
+                    ]);
+                
+                $this->log('info', "Marked " . count($syncLogIds) . " sync logs as failed");
+            }
+        } catch (\Exception $e) {
+            $this->log('error', "Failed marking sync logs as failed: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Get sync statistics from SyncLog
+     */
+    public function getSyncLogStats(): array
+    {
+        try {
+            return SyncLog::getSyncStats();
+        } catch (\Exception $e) {
+            $this->log('error', "Failed getting sync log stats: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Clean up old completed sync logs
+     */
+    public function cleanupOldSyncLogs(int $daysOld = 7): int
+    {
+        try {
+            $deleted = SyncLog::cleanupOldLogs($daysOld);
+            $this->log('info', "Cleaned up {$deleted} old sync logs");
+            return $deleted;
+        } catch (\Exception $e) {
+            $this->log('error', "Failed cleaning up old sync logs: " . $e->getMessage());
+            return 0;
         }
     }
 }
