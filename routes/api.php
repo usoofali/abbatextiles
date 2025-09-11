@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\SyncController;
 
 /*
 |--------------------------------------------------------------------------
@@ -435,6 +436,7 @@ Route::middleware(['auth:api', 'Is_Active'])->group(function () {
     Route::post('reset/{tableName?}', 'SyncController@reset');
     Route::post('full', 'SyncController@fullSync');
 });
+
 
 // Sync API routes
 Route::prefix('sync')->group(function () {
