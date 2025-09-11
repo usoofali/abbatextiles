@@ -3,11 +3,9 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use App\Traits\Syncable;
 
 class Product extends Model
 {
-    use Syncable;
 
     protected $dates = ['deleted_at'];
 

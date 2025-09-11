@@ -1,7 +1,7 @@
 <?php
 
-namespace App\Http\Controllers\Api;
-use App\Http\Controllers\Controller;
+namespace App\Http\Controllers;
+
 use App\Services\SyncService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -22,11 +22,17 @@ class SyncController extends Controller
      */
     protected function log(string $level, string $message, array $context = []): void
     {
-        // Check if daily channel exists, otherwise use default
-        try {
-            Log::channel("daily")->$level($message, $context);
-        } catch (\Exception $e) {
-            // Fallback to default logging if daily channel fails
+        // Check if sync logging is enabled
+        if (!config('app.sync_logging_enabled', true)) {
+            return;
+        }
+
+        // Use sync channel if available, otherwise fallback to default
+        $channel = config('logging.channels.sync') ? 'sync' : null;
+        
+        if ($channel) {
+            Log::channel($channel)->$level($message, $context);
+        } else {
             Log::$level($message, $context);
         }
     }
@@ -354,72 +360,6 @@ class SyncController extends Controller
 
         } catch (\Exception $e) {
             $this->log('error', "Full sync failed: " . $e->getMessage());
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Internal server error',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Upload data to the system (alias for push)
-     * 
-     * @param Request $request
-     * @return JsonResponse
-     */
-    public function upload(Request $request): JsonResponse
-    {
-        // Extract table name from request or use a default
-        $tableName = $request->input('table', 'transactions');
-        
-        return $this->push($request, $tableName);
-    }
-
-    /**
-     * Download data from the system (alias for push)
-     * 
-     * @param Request $request
-     * @return JsonResponse
-     */
-    public function download(Request $request): JsonResponse
-    {
-        // Extract table name from request or use a default
-        $tableName = $request->input('table', 'transactions');
-        
-        return $this->pull($request, $tableName);
-    }
-
-    /**
-     * Acknowledge sync operation
-     * 
-     * @param Request $request
-     * @return JsonResponse
-     */
-    public function acknowledge(Request $request): JsonResponse
-    {
-        try {
-            $this->log('info', "Sync acknowledgment received");
-            
-            $data = $request->all();
-            $tableName = $data['table'] ?? 'unknown';
-            $status = $data['status'] ?? 'unknown';
-            
-            // Update last sync time for the acknowledged table
-            if ($tableName !== 'unknown') {
-                $this->syncService->updateLastSyncTime($tableName);
-            }
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Sync acknowledged successfully',
-                'table' => $tableName,
-                'status' => $status
-            ]);
-
-        } catch (\Exception $e) {
-            $this->log('error', "Sync acknowledgment failed: " . $e->getMessage());
             
             return response()->json([
                 'success' => false,
